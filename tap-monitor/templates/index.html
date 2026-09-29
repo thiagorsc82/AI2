@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TAP Monitor · {{ origin }}</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--fg:#1a2233;--mut:#6b7385;--line:#e3e6ec;--acc:#0b7a4b}
+@media(prefers-color-scheme:dark){:root{--bg:#12151b;--card:#1b1f27;--fg:#e8ebf1;--mut:#9099ab;--line:#2b303b;--acc:#3ecf8e}}
+*{box-sizing:border-box}body{margin:0;font:15px system-ui,sans-serif;background:var(--bg);color:var(--fg)}
+main{max-width:1150px;margin:0 auto;padding:20px 16px}
+h1{font-size:22px;margin:0 0 4px}.sub{color:var(--mut);margin-bottom:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:16px}
+.bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
+select,button{font:inherit;padding:6px 10px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--fg)}
+button{cursor:pointer}button.p{background:var(--acc);color:#fff;border-color:var(--acc)}
+.chip{padding:4px 10px;border-radius:999px;border:1px solid var(--line);cursor:pointer;font-size:13px;user-select:none}
+.chip.off{opacity:.4}
+.chip i{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px}
+table{width:100%;border-collapse:collapse}th,td{text-align:right;padding:8px;border-bottom:1px solid var(--line)}
+th:first-child,td:first-child{text-align:left}th{color:var(--mut);font-weight:500;font-size:13px}
+.chartbox{position:relative;height:420px}.mut{color:var(--mut);font-size:13px}
+.down{color:var(--acc);font-weight:600}
+</style></head><body><main>
+<h1>✈ TAP Air Portugal · {{ origin }} → Europa</h1>
+<div class="sub">Fonte: {{ 'Google Flights via SerpApi' if provider=='serpapi' else 'MODO DEMO (dados sintéticos)' }} · coleta a cada {{ interval }} min · <span id="status"></span></div>
+
+<div class="card">
+ <div class="bar">
+  <label>Período <select id="days"><option value="7">7 dias</option><option value="30">30 dias</option><option value="90" selected>3 meses</option></select></label>
+  <label>Antecedência <select id="da">{% for d in days_ahead %}<option value="{{d}}">{{d}} dias</option>{% endfor %}</select></label>
+  <label>Granularidade <select id="gran"><option value="day">Diária (mínimo do dia)</option><option value="hour">Horária</option></select></label>
+  <button class="p" id="collect">Coletar agora</button>
+ </div>
+ <div class="bar" id="chips"></div>
+ <p class="mut" id="hint"></p>
+ <div class="chartbox"><canvas id="chart"></canvas></div>
+</div>
+
+<div class="card"><table><thead><tr><th>Destino</th><th>Atual</th><th>Mínimo</th><th>Média</th><th>Máximo</th><th>vs. média</th><th>Escalas</th><th>Data do voo</th></tr></thead><tbody id="rows"></tbody></table>
+<p class="mut">Preços em {{ currency }} (menor tarifa TAP encontrada em cada coleta).</p></div>
+</main>
+<script>
+const CITY={{ catalog|tojson }}, DESTS={{ dests|tojson }}, CUR="{{ currency }}";
+const PAL=["#2a6fdb","#e4572e","#17a398","#9b5de5","#f2a900","#d81b60","#5c6b73","#6a994e","#00a6fb","#8d5524"];
+const color=d=>PAL[DESTS.indexOf(d)%PAL.length], off=new Set();
+const money=v=>v==null?"–":new Intl.NumberFormat("pt-BR",{style:"currency",currency:CUR,maximumFractionDigits:0}).format(v);
+const $=id=>document.getElementById(id);
+let chart;
+function chips(){ $("chips").innerHTML=DESTS.map(d=>`<span class="chip ${off.has(d)?'off':''}" data-d="${d}"><i style="background:${color(d)}"></i>${CITY[d]||d} (${d})</span>`).join("");
+ document.querySelectorAll(".chip").forEach(e=>e.onclick=()=>{off.has(e.dataset.d)?off.delete(e.dataset.d):off.add(e.dataset.d);chips();load();});}
+async function load(){
+ const p=`days=${$("days").value}&da=${$("da").value}&gran=${$("gran").value}`;
+ const [s,sum]=await Promise.all([fetch("/api/series?"+p).then(r=>r.json()),fetch("/api/summary?"+p).then(r=>r.json())]);
+ const ds=Object.keys(s).filter(d=>!off.has(d)).map(d=>({label:`${CITY[d]||d} (${d})`,borderColor:color(d),backgroundColor:color(d),borderWidth:2,pointRadius:s[d].length<60?4:0,pointHoverRadius:6,tension:.25,
+   data:s[d].map(x=>({x:x.t,y:x.min}))}));
+ const maxPts=Math.max(0,...Object.values(s).map(a=>a.length));
+ $("hint").textContent=maxPts<2?"Ainda há só 1 coleta por destino: as linhas aparecem a partir da 2ª coleta (a cada hora). Mude para granularidade horária para vê-las mais cedo.":"";
+ if(chart)chart.destroy();
+ chart=new Chart($("chart"),{type:"line",data:{datasets:ds},options:{responsive:true,maintainAspectRatio:false,interaction:{mode:"nearest",intersect:false,axis:"x"},
+  scales:{x:{type:"time",time:{unit:$("days").value==7?"day":"week"}},y:{ticks:{callback:v=>money(v)}}},
+  plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>`${c.dataset.label}: ${money(c.parsed.y)}`}}}}});
+ $("rows").innerHTML=sum.map(r=>{const dv=(r.last/r.avg-1)*100;return `<tr><td>${r.city} (${r.dest})</td><td><b>${money(r.last)}</b></td><td>${money(r.min)}</td><td>${money(r.avg)}</td><td>${money(r.max)}</td><td class="${dv<0?'down':''}">${dv>0?'+':''}${dv.toFixed(1)}%</td><td>${r.stops}</td><td>${r.depart}</td></tr>`}).join("")||`<tr><td colspan=8 class="mut">Aguardando primeira coleta…</td></tr>`;
+ const st=await fetch("/api/status").then(r=>r.json());
+ $("status").textContent=st.ts?`última coleta: ${new Date(st.ts).toLocaleString("pt-BR")} (${st.ok} ok${st.message?` · ${st.message}`:""})`:"sem coletas ainda";
+}
+["days","da","gran"].forEach(i=>$(i).onchange=load);
+$("collect").onclick=async e=>{e.target.disabled=true;e.target.textContent="Coletando…";await fetch("/api/collect",{method:"POST"});e.target.disabled=false;e.target.textContent="Coletar agora";load();};
+chips();load();setInterval(load,300000);
+</script></body></html>
