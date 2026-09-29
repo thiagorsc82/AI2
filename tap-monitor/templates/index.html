@@ -32,6 +32,7 @@ th:first-child,td:first-child{text-align:left}th{color:var(--mut);font-weight:50
   <button class="p" id="collect">Coletar agora</button>
  </div>
  <div class="bar" id="chips"></div>
+ <p class="mut" id="hint"></p>
  <div class="chartbox"><canvas id="chart"></canvas></div>
 </div>
 
@@ -50,8 +51,10 @@ function chips(){ $("chips").innerHTML=DESTS.map(d=>`<span class="chip ${off.has
 async function load(){
  const p=`days=${$("days").value}&da=${$("da").value}&gran=${$("gran").value}`;
  const [s,sum]=await Promise.all([fetch("/api/series?"+p).then(r=>r.json()),fetch("/api/summary?"+p).then(r=>r.json())]);
- const ds=Object.keys(s).filter(d=>!off.has(d)).map(d=>({label:`${CITY[d]||d} (${d})`,borderColor:color(d),backgroundColor:color(d),borderWidth:2,pointRadius:0,tension:.25,
+ const ds=Object.keys(s).filter(d=>!off.has(d)).map(d=>({label:`${CITY[d]||d} (${d})`,borderColor:color(d),backgroundColor:color(d),borderWidth:2,pointRadius:s[d].length<60?4:0,pointHoverRadius:6,tension:.25,
    data:s[d].map(x=>({x:x.t,y:x.min}))}));
+ const maxPts=Math.max(0,...Object.values(s).map(a=>a.length));
+ $("hint").textContent=maxPts<2?"Ainda há só 1 coleta por destino: as linhas aparecem a partir da 2ª coleta (a cada hora). Mude para granularidade horária para vê-las mais cedo.":"";
  if(chart)chart.destroy();
  chart=new Chart($("chart"),{type:"line",data:{datasets:ds},options:{responsive:true,maintainAspectRatio:false,interaction:{mode:"nearest",intersect:false,axis:"x"},
   scales:{x:{type:"time",time:{unit:$("days").value==7?"day":"week"}},y:{ticks:{callback:v=>money(v)}}},
